@@ -12,7 +12,6 @@ N = 200
 dt = 0.02
 x_goal = np.array([-0.5, 1.8, 0, 0, 0, 0])
 
-# TODO: Adjust the costs as needed for convergence
 Q = np.eye(6)
 Qf = 1e2 * np.eye(6)
 R = 1e-3 * np.eye(2)

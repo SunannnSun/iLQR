@@ -101,14 +101,12 @@ class iLQR(object):
         :param uk: input
         :return: [∂l/∂xᵀ, ∂l/∂uᵀ]ᵀ, evaluated at xk, uk
         """
-        grad = np.zeros((8,))
-    
-        #TODO: Compute the gradient
+        grad = np.zeros((self.nx+self.nu,))
         
-        for i in range(6):
+        for i in range(self.nx):
             grad[i] = (xk[i] - self.x_goal[i]) * self.Q[i, i]
 
-        for i in range(2):
+        for i in range(self.nu):
             grad[6 + i] = (uk[i] - self.u_goal[i]) * self.R[i, i]
         
         return grad
@@ -124,11 +122,11 @@ class iLQR(object):
         H = np.zeros((self.nx + self.nu, self.nx + self.nu))
 
         # TODO: Compute the hessian
-        for i in range(6):
+        for i in range(self.nx):
             H[i, i] = self.Q[i, i]
         
-        for i in range(2):
-            H[6+i, 6+i] = self.R[i, i]
+        for i in range(self.nu):
+            H[self.nx+i, self.nx+i] = self.R[i, i]
         return H
 
     def terminal_cost(self, xf: np.ndarray) -> float:
@@ -146,8 +144,6 @@ class iLQR(object):
 
         grad = np.zeros((self.nx))
         
-        # TODO: Compute the gradient
-
         for i in range(self.nx):
             grad[i] = (xf[i] - self.x_goal[i]) * self.Qf[i, i]
         return grad
@@ -160,8 +156,6 @@ class iLQR(object):
 
         H = np.zeros((self.nx, self.nx))
         
-        # TODO: Compute H
-
         for i in range(self.nx):
             H[i, i] = self.Qf[i, i]
 
@@ -180,71 +174,67 @@ class iLQR(object):
 
         xtraj = [np.zeros((self.nx,))] * self.N
         utraj = [np.zeros((self.nu,))] * (self.N - 1)
-        xtraj[0] = xx[0]
         
         N = len(xx)
-        # TODO: compute forward pass
-
-        delta_x_k = xtraj[0] - xx[0]
-        utraj[0] = uu[0] + KK[0] @ delta_x_k + dd[0]
         
-        for i in np.arange(0, N-1):
-            delta_x_k = xtraj[i] - xx[i]
-            utraj[i] = uu[i] + KK[i] @ delta_x_k + dd[i]
+        # Initialize the starting point
+        xtraj[0] = xx[0]
 
-            xtraj[i+1] =  quad_sim.F(xtraj[i], utraj[i], self.dt)
+        # Find the new input control by adding the input in error state to the current guess
+        # then simulate forward
+        for k in np.arange(0, N-1):
+            utraj[k] = uu[k] + KK[k] @ (xtraj[k] - xx[k]) + dd[k]
+            xtraj[k+1] =  quad_sim.F(xtraj[k], utraj[k], self.dt)
 
         return xtraj, utraj
+
+
 
     def backward_pass(self,  xx: List[np.ndarray], uu: List[np.ndarray]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         """
         :param xx: state trajectory guess, should be length N
         :param uu: input trajectory guess, should be length N-1
         :return: KK and dd, the feedback and feedforward components of the iLQR update
+
+        :note: g_kp1 and H_kp1 are the approximation of cost-to-go up to second order; 
+               whereas l_x, l_u, l_xx, .. are the approximation of local cost
         """
+
         dd = [np.zeros((self.nu,))] * (self.N - 1)
         KK = [np.zeros((self.nu, self.nx))] * (self.N - 1)
 
-        # TODO: compute backward pass
-
         N = len(xx)
 
-        for i in np.arange(N-2, -1, -1):
-            x_k = xx[i]
-            u_k = uu[i]
-            A_k, B_k = self.get_linearized_discrete_dynamics(x_k, u_k)
+        # At the goal, the cost-to-go reduces to terminal cost only
+        g_kp1 = self.grad_terminal_cost(xx[-1])
+        H_kp1 = self.hess_terminal_cost(xx[-1])
+        
+        # Starting from the second to last state
+        for k in reversed(range(N-1)):
+            A_k, B_k = self.get_linearized_discrete_dynamics(xx[k], uu[k])
 
-            x_k_plus_1 = xx[i+1]
+            grad_running_cost = self.grad_running_cost(xx[k], uu[k])
+            l_x = grad_running_cost[ :self.nx]
+            l_u = grad_running_cost[self.nx: ]
 
-            if i == N-2:
-                g_k_plus_1 = self.grad_terminal_cost(x_k_plus_1)
-                H_k_plus_1 = self.hess_terminal_cost(x_k_plus_1)
-            else:
-                g_k_plus_1 = Q_x - KK[i+1].T @ Q_uu @ dd[i+1]
-                H_k_plus_1 = Q_xx - KK[i+1].T @ Q_uu @ KK[i+1]
-
-            grad_running_cost = self.grad_running_cost(x_k, u_k)
-            l_x = grad_running_cost[0:self.nx]
-            l_u = grad_running_cost[self.nx:8]
-
-
-            hess_running_cost = self.hess_running_cost(x_k, u_k)
+            hess_running_cost = self.hess_running_cost(xx[k], uu[k])
             l_xx = hess_running_cost[0:self.nx, 0:self.nx]
             l_uu = hess_running_cost[self.nx:8, self.nx:8]
             l_ux = hess_running_cost[self.nx:8, 0:self.nx]
-            l_xu = l_ux.T
 
-            Q_x = l_x + A_k.T @ g_k_plus_1
-            Q_u = l_u + B_k.T @ g_k_plus_1
+            Q_x = l_x + A_k.T @ g_kp1
+            Q_u = l_u + B_k.T @ g_kp1
 
-            Q_xx = l_xx + A_k.T @ H_k_plus_1 @ A_k
-            Q_uu = l_uu + B_k.T @ H_k_plus_1 @ B_k
-            Q_ux = l_ux + B_k.T @ H_k_plus_1 @ A_k
-            Q_xu = Q_ux.T
+            Q_xx = l_xx + A_k.T @ H_kp1 @ A_k
+            Q_uu = l_uu + B_k.T @ H_kp1 @ B_k
+            Q_ux = l_ux + B_k.T @ H_kp1 @ A_k
 
-            dd[i] = -np.linalg.inv(Q_uu) @ Q_u
-            KK[i] = -np.linalg.inv(Q_uu) @ Q_ux
-            # x_k = xx[]
+            dd[k] = -np.linalg.solve(Q_uu, Q_u) 
+            KK[k] = -np.linalg.solve(Q_uu, Q_ux) 
+
+            g_kp1 = Q_x - KK[k].T @ Q_uu @ dd[k]
+            H_kp1 = Q_xx - KK[k].T @ Q_uu @ KK[k]
+
 
         return dd, KK
 

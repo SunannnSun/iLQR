@@ -23,7 +23,7 @@ def _f(x, u):
                    -sin(theta) * (u0 + u1) / m,
                    -g + cos(theta) * (u0 + u1) / m,
                    a * (u0 - u1) / I])
-
+  
   return xdot
 
 
