@@ -28,10 +28,10 @@ class iLQR(object):
         self.dt = dt
 
         # Solver parameters
-        self.alpha = 1e-2     
-        # self.alpha = 0.8    
+        self.alpha = 0.8
         self.max_iter = 1e3
         self.tol = 1e-4
+        # self.tol = 0.1
 
         # target state
         self.x_goal = x_goal
@@ -183,7 +183,7 @@ class iLQR(object):
         # Find the new input control by adding the input in error state to the current guess
         # then simulate forward
         for k in np.arange(0, N-1):
-            utraj[k] = uu[k] + KK[k] @ (xtraj[k] - xx[k]) + dd[k]
+            utraj[k] = uu[k] + KK[k] @ (xtraj[k] - xx[k]) + self.alpha * dd[k]
             xtraj[k+1] =  quad_sim.F(xtraj[k], utraj[k], self.dt)
 
         return xtraj, utraj
@@ -218,9 +218,9 @@ class iLQR(object):
             l_u = grad_running_cost[self.nx: ]
 
             hess_running_cost = self.hess_running_cost(xx[k], uu[k])
-            l_xx = hess_running_cost[0:self.nx, 0:self.nx]
-            l_uu = hess_running_cost[self.nx:8, self.nx:8]
-            l_ux = hess_running_cost[self.nx:8, 0:self.nx]
+            l_xx = hess_running_cost[ :self.nx, :self.nx]
+            l_uu = hess_running_cost[self.nx: , self.nx:]
+            l_ux = hess_running_cost[self.nx: , :self.nx]
 
             Q_x = l_x + A_k.T @ g_kp1
             Q_u = l_u + B_k.T @ g_kp1
@@ -260,15 +260,18 @@ class iLQR(object):
         uu = uu_guess
         KK = None
 
+        xx_list = [xx]
+
         i = 0
         print(f'cost: {Jnext}')
         while np.abs(Jprev - Jnext) > self.tol and i < self.max_iter:
             dd, KK = self.backward_pass(xx, uu)
             xx, uu = self.forward_pass(xx, uu, dd, KK)
+            xx_list.append(xx)
 
             Jprev = Jnext
             Jnext = self.total_cost(xx, uu)
             print(f'cost: {Jnext}')
             i += 1
         print(f'Converged to cost {Jnext}')
-        return xx, uu, KK
+        return xx, uu, KK, xx_list
