@@ -30,8 +30,8 @@ class iLQR(object):
         # Solver parameters
         self.alpha = 0.8
         self.max_iter = 1e3
-        self.tol = 1e-4
-        # self.tol = 0.1
+        # self.tol = 1e-4
+        self.tol = 1e-2
 
         # target state
         self.x_goal = x_goal

@@ -2,3 +2,9 @@
 .DS_Store
 __pycache__
 venv
+
+u_sol.npy
+x_list.npy
+x_sol.npy
+
+MPC/
